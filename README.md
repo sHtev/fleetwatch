@@ -11,6 +11,10 @@ uv run fastapi dev src/fleetwatch/main.py
 
 API docs: http://localhost:8000/docs
 
+## Live map
+
+With the API running, open http://localhost:8000/map and start the simulator with `--realtime`. Vans move along their rounds every few seconds, coloured by speed against the limit (green within it, amber within the 10% + 2 mph tolerance, red speeding, grey parked). Click a van for its driver's score.
+
 ## Simulated fleet
 
 ```sh

@@ -55,6 +55,20 @@ class EventCreate(BaseModel):
     speed_limit_mph: float | None = Field(default=None, gt=0, le=70)  # UK maximum is 70
 
 
+class VehiclePosition(BaseModel):
+    """Where a vehicle was last seen, for the live map."""
+
+    vehicle_id: int
+    registration: str
+    driver_id: int | None
+    driver_name: str | None
+    recorded_at: datetime
+    latitude: float
+    longitude: float
+    speed_mph: float
+    speed_limit_mph: float | None
+
+
 class EventRead(EventCreate):
     model_config = ConfigDict(from_attributes=True)
 

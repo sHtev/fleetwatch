@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fleetwatch live map</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <style>
+    html, body { margin: 0; height: 100%; font: 15px/1.4 system-ui, sans-serif; }
+    #map { height: 100%; }
+    .legend { background: #fff; padding: 8px 10px; border-radius: 6px; box-shadow: 0 1px 4px #0004; }
+    .legend span { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+                   margin-right: 6px; vertical-align: -1px; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+const POLL_MS = 3000;
+const STALE_SECONDS = 60; // no report for this long: parked with the engine off
+const COLOURS = { ok: "#1a9850", near: "#f39c12", over: "#d7301f", parked: "#888" };
+const ROUND_COLOURS = ["#4575b4", "#7b3294", "#008837", "#a6611a"];
+
+const map = L.map("map").setView([53.962, -1.08], 13);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+
+// Same rule as the scoring: over the limit by more than 10% + 2 mph is speeding.
+function status(p) {
+  if ((Date.now() - Date.parse(p.recorded_at)) / 1000 > STALE_SECONDS) return "parked";
+  if (p.speed_limit_mph == null || p.speed_mph <= p.speed_limit_mph) return "ok";
+  return p.speed_mph > p.speed_limit_mph * 1.1 + 2 ? "over" : "near";
+}
+
+const legend = L.control({ position: "bottomleft" });
+legend.onAdd = () => {
+  const div = L.DomUtil.create("div", "legend");
+  div.innerHTML = [["ok", "within the limit"], ["near", "within tolerance"],
+                   ["over", "speeding"], ["parked", "parked"]]
+    .map(([k, label]) => `<div><span style="background:${COLOURS[k]}"></span>${label}</div>`).join("");
+  return div;
+};
+legend.addTo(map);
+
+fetch("/map/rounds").then(r => r.json()).then(rounds => rounds.forEach((round, i) => {
+  const colour = ROUND_COLOURS[i % ROUND_COLOURS.length];
+  L.polyline(round.line, { color: colour, weight: 3, opacity: 0.5 }).bindTooltip(round.name).addTo(map);
+  round.stops.forEach(s => L.circleMarker(s.at, { radius: 3, color: colour }).bindTooltip(s.label).addTo(map));
+}));
+
+const markers = new Map();
+async function refresh() {
+  const positions = await (await fetch("/vehicles/positions")).json();
+  for (const p of positions) {
+    const state = status(p);
+    let marker = markers.get(p.vehicle_id);
+    if (!marker) {
+      marker = L.circleMarker([p.latitude, p.longitude], { radius: 9, weight: 2, color: "#fff", fillOpacity: 1 })
+        .bindTooltip(p.registration, { permanent: true, direction: "right", offset: [8, 0] })
+        .addTo(map);
+      marker.on("click", () => showScore(marker, p.driver_id));
+      markers.set(p.vehicle_id, marker);
+    }
+    marker.setLatLng([p.latitude, p.longitude]).setStyle({ fillColor: COLOURS[state] });
+    marker.details = `<b>${p.registration}</b> · ${p.driver_name ?? "no driver"}<br>` +
+      `${p.speed_mph.toFixed(0)} mph in a ${p.speed_limit_mph ?? "?"} limit (${state})`;
+  }
+}
+
+async function showScore(marker, driverId) {
+  let html = marker.details;
+  if (driverId != null) {
+    const s = await (await fetch(`/drivers/${driverId}/score`)).json();
+    html += `<br>Score <b>${s.score}</b> over the last 7 days: ${s.distance_miles} miles, ` +
+      `${s.harsh_events} harsh events, ${s.speeding_percent}% speeding`;
+  }
+  marker.bindPopup(html).openPopup();
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
