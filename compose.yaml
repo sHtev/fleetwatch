@@ -1,0 +1,20 @@
+# Local Postgres for development and tests.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: fleetwatch
+      POSTGRES_PASSWORD: fleetwatch
+      POSTGRES_DB: fleetwatch
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleetwatch"]
+      interval: 2s
+      retries: 15
+
+volumes:
+  pgdata:
