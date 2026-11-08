@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fleetwatch
+          POSTGRES_PASSWORD: fleetwatch
+          POSTGRES_DB: fleetwatch_test  # the tests only use this database
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetwatch"
+          --health-interval 2s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest

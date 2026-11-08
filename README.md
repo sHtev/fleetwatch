@@ -18,7 +18,7 @@ With the API running, open http://localhost:8000/map and start the simulator wit
 ## Simulated fleet
 
 ```sh
-uv run python scripts/simulate.py              # 2 hours of history for 3 vans around York
+uv run python scripts/simulate.py              # 2 hours of history for 4 vans on their rounds
 uv run python scripts/simulate.py --realtime   # live events every 5 s, until Ctrl-C
 ```
 
@@ -39,9 +39,17 @@ uv run alembic revision --autogenerate -m "describe the change"   # then review 
 uv run alembic upgrade head
 ```
 
+## How it was built
+
+I built this with an AI coding agent (Claude Code), working in small steps: I set the direction and the design decisions, reviewed each change, and corrected it where it went wrong. Some examples of the decisions and corrections are in the commit history, such as switching to UK units with a hand-written data migration, and taking route positions from OSRM's geometry after finding that its node IDs lose precision.
+
 ## Tests
 
 ```sh
 uv run pytest
 uv run ruff check .
 ```
+
+## Licence
+
+Code: MIT (see `LICENSE`). Map data © OpenStreetMap contributors, ODbL.
