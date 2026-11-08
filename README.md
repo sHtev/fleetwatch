@@ -1,5 +1,7 @@
 # Fleetwatch
 
+[![CI](https://github.com/sHtev/fleetwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/sHtev/fleetwatch/actions/workflows/ci.yml)
+
 A small fleet telematics demo: simulated vehicles send events (position, speed, harsh braking) to a FastAPI service, which stores them in Postgres and scores drivers. A React Native (Expo) driver app comes later.
 
 ## Running locally
