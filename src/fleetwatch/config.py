@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     database_url: str = "postgresql+psycopg://fleetwatch:fleetwatch@localhost:5432/fleetwatch"
+    cors_origins: list[str] = ["http://localhost:8081"]  # the Expo dev server
     rounds_file: str = str(Path(__file__).parent.parent.parent / "data" / "york_rounds.json")
 
 
