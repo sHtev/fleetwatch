@@ -34,7 +34,8 @@ def test_positions_are_each_vehicles_latest_event(client: TestClient) -> None:
             "latitude": lat,
             "longitude": -1.08,
             "speed_mph": 20.0,
-            "speed_limit_mph": 30.0,
+            "speed_limit_mph": 60.0,
+            "carriageway": "single",
         }
 
     # Sent out of order: the latest is chosen by recorded_at, not by arrival.
@@ -44,3 +45,6 @@ def test_positions_are_each_vehicles_latest_event(client: TestClient) -> None:
     assert positions["YK24 ABC"]["latitude"] == 53.97
     assert positions["YK24 ABC"]["driver_name"] == "Sam"
     assert positions["AB12 CDE"]["driver_name"] is None
+    # A van's limit on a national-limit single carriageway is 50, not the posted 60.
+    assert positions["YK24 ABC"]["speed_limit_mph"] == 60.0
+    assert positions["YK24 ABC"]["effective_limit_mph"] == 50.0

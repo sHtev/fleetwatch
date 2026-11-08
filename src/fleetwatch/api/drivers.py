@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from fleetwatch.db import get_session
-from fleetwatch.models import Driver, Event
+from fleetwatch.models import Driver, Event, Vehicle
 from fleetwatch.schemas import DriverCreate, DriverRead, DriverScoreRead
 from fleetwatch.scoring import Sample, score_driver
 
@@ -42,10 +42,10 @@ def get_driver_score(
     until = until or datetime.now(UTC)
     since = since or until - timedelta(days=7)
 
-    events = session.scalars(
-        select(Event).where(
-            Event.driver_id == driver_id, Event.recorded_at >= since, Event.recorded_at < until
-        )
+    rows = session.execute(
+        select(Event, Vehicle.vehicle_class)
+        .join(Vehicle, Event.vehicle_id == Vehicle.id)
+        .where(Event.driver_id == driver_id, Event.recorded_at >= since, Event.recorded_at < until)
     )
     result = score_driver(
         Sample(
@@ -56,8 +56,10 @@ def get_driver_score(
             longitude=e.longitude,
             speed_mph=e.speed_mph,
             speed_limit_mph=e.speed_limit_mph,
+            carriageway=e.carriageway,
+            vehicle_class=vehicle_class,
         )
-        for e in events
+        for e, vehicle_class in rows
     )
     return DriverScoreRead(
         driver_id=driver_id,

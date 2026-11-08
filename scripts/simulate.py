@@ -19,6 +19,9 @@ from pathlib import Path
 
 import httpx
 
+from fleetwatch.models import Carriageway, VehicleClass
+from fleetwatch.scoring import effective_limit_mph
+
 ROUNDS_FILE = Path(__file__).parent.parent / "data" / "york_rounds.json"
 SAMPLE_SECONDS = 5  # how often the device reports
 PHYSICS_SECONDS = 1  # how often the driver reacts, so short stretches aren't skipped over
@@ -40,18 +43,19 @@ class Style:
 
     speed_factor: float
     harsh_chance: float
+    knows_van_limits: bool  # or just follows the signs, which are for cars
 
 
 STYLES = {
-    "careful": Style(speed_factor=0.92, harsh_chance=0.0005),
-    "average": Style(speed_factor=1.0, harsh_chance=0.0015),
-    "heavy-footed": Style(speed_factor=1.15, harsh_chance=0.006),
+    "careful": Style(speed_factor=0.92, harsh_chance=0.0005, knows_van_limits=True),
+    "average": Style(speed_factor=1.0, harsh_chance=0.0015, knows_van_limits=False),
+    "heavy-footed": Style(speed_factor=1.15, harsh_chance=0.006, knows_van_limits=False),
 }
-FLEET = [  # registration, driver name, driving style, round
-    ("YK24 ABC", "Sam Patel", "careful", "North"),
-    ("YK73 DEF", "Alex Jones", "average", "East"),
-    ("YJ22 GHI", "Chris Wood", "heavy-footed", "South"),
-    ("YH21 JKL", "Jo Clarke", "average", "West"),
+FLEET = [  # registration, driver name, driving style, round, vehicle class
+    ("YK24 ABC", "Sam Patel", "careful", "North", VehicleClass.VAN),
+    ("YK73 DEF", "Alex Jones", "average", "East", VehicleClass.VAN),
+    ("YJ22 GHI", "Chris Wood", "heavy-footed", "South", VehicleClass.VAN),
+    ("YH21 JKL", "Jo Clarke", "average", "West", VehicleClass.CAR),  # a car-derived van
 ]
 
 
@@ -76,9 +80,16 @@ def turn_degrees(a: list[float], b: list[float], c: list[float]) -> float:
 
 class Van:
     def __init__(
-        self, vehicle_id: int, driver_id: int, style: Style, round_: dict, rng: random.Random
+        self,
+        vehicle_id: int,
+        vehicle_class: VehicleClass,
+        driver_id: int,
+        style: Style,
+        round_: dict,
+        rng: random.Random,
     ) -> None:
-        self.vehicle_id, self.driver_id, self.style, self.rng = vehicle_id, driver_id, style, rng
+        self.vehicle_id, self.vehicle_class = vehicle_id, vehicle_class
+        self.driver_id, self.style, self.rng = driver_id, style, rng
         self.path = round_["path"]  # [lat, lon, limit_mph, carriageway, limit_source, road]
         self.stops = {s["path_index"] for s in round_["stops"]}
         # Distance along the round to each point, for "how far to the next stop".
@@ -96,12 +107,16 @@ class Van:
         fraction = self.along / stretch if stretch else 0.0
         return a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction
 
-    def preferred_speed(self, limit: float) -> float:
+    def preferred_speed(self, i: int) -> float:
+        """The speed this driver would like on the stretch from path[i]."""
+        limit, carriageway = self.path[i][2], Carriageway(self.path[i][3])
+        if self.style.knows_van_limits:
+            limit = effective_limit_mph(limit, carriageway, self.vehicle_class)
         return limit * self.style.speed_factor + self.mood
 
     def target_speed(self) -> float:
         self.mood = 0.98 * self.mood + self.rng.gauss(0, 0.45)  # same wander, at 1 s steps
-        target = self.preferred_speed(self.path[self.index][2])
+        target = self.preferred_speed(self.index)
 
         # Anything ahead that needs a lower speed (a drop, a lower limit, a sharp corner) caps
         # today's speed at whatever still lets us brake down to it in time: v² = u² + 2ad,
@@ -116,7 +131,7 @@ class Van:
             ahead = self.miles_to[i] - here
             if ahead > LIMIT_LOOK_AHEAD_MILES:
                 break
-            target = min(target, reachable(self.preferred_speed(self.path[i][2]), ahead))
+            target = min(target, reachable(self.preferred_speed(i), ahead))
             if ahead <= CORNER_LOOK_AHEAD_MILES and (
                 turn_degrees(self.path[i - 1], self.path[i], self.path[i + 1]) > CORNER_DEGREES
             ):
@@ -171,6 +186,7 @@ class Van:
             "longitude": round(lon, 6),
             "speed_mph": round(self.speed, 1),
             "speed_limit_mph": float(self.path[self.index][2]),
+            "carriageway": self.path[self.index][3],
         }
 
 
@@ -180,15 +196,23 @@ def ensure_fleet(client: httpx.Client, rng: random.Random) -> list[Van]:
     vehicles = {v["registration"]: v["id"] for v in client.get("/vehicles").json()}
     drivers = {d["name"]: d["id"] for d in client.get("/drivers").json()}
     vans = []
-    for registration, name, style, round_name in FLEET:
+    for registration, name, style, round_name, vehicle_class in FLEET:
         if registration not in vehicles:
-            response = client.post("/vehicles", json={"registration": registration})
+            vehicle = {"registration": registration, "vehicle_class": vehicle_class}
+            response = client.post("/vehicles", json=vehicle)
             vehicles[registration] = response.raise_for_status().json()["id"]
         if name not in drivers:
             response = client.post("/drivers", json={"name": name})
             drivers[name] = response.raise_for_status().json()["id"]
         vans.append(
-            Van(vehicles[registration], drivers[name], STYLES[style], rounds[round_name], rng)
+            Van(
+                vehicles[registration],
+                vehicle_class,
+                drivers[name],
+                STYLES[style],
+                rounds[round_name],
+                rng,
+            )
         )
     return vans
 
@@ -225,10 +249,11 @@ def main() -> None:
                 sent += len(batch)
                 batch = []
         print(f"Sent {sent} events for {len(vans)} vans over {args.hours} hours.")
-        for van, (_, name, style, round_name) in zip(vans, FLEET, strict=True):
+        for van, (_, name, style, round_name, vehicle_class) in zip(vans, FLEET, strict=True):
             score = client.get(f"/drivers/{van.driver_id}/score").json()
             print(
-                f"  {name:<11} ({style:<12}) {round_name:<5} score {score['score']:>5}  "
+                f"  {name:<11} ({style:<12}) {round_name:<5} {vehicle_class:<3} "
+                f"score {score['score']:>5}  "
                 f"{score['distance_miles']:>5} miles in {score['driving_minutes']:>5} min  "
                 f"speeding {score['speeding_percent']}%  harsh {score['harsh_events']}"
             )

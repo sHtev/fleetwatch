@@ -30,11 +30,18 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 
-// Same rule as the scoring: over the limit by more than 10% + 2 mph is speeding.
+// Same rule as the scoring: over the vehicle's limit by more than 10% + 2 mph is speeding.
 function status(p) {
+  const limit = p.effective_limit_mph;
   if ((Date.now() - Date.parse(p.recorded_at)) / 1000 > STALE_SECONDS) return "parked";
-  if (p.speed_limit_mph == null || p.speed_mph <= p.speed_limit_mph) return "ok";
-  return p.speed_mph > p.speed_limit_mph * 1.1 + 2 ? "over" : "near";
+  if (limit == null || p.speed_mph <= limit) return "ok";
+  return p.speed_mph > limit * 1.1 + 2 ? "over" : "near";
+}
+
+function limitText(p) {
+  if (p.effective_limit_mph == null) return "an unknown limit";
+  const posted = p.speed_limit_mph !== p.effective_limit_mph ? ` (signs say ${p.speed_limit_mph})` : "";
+  return `a ${p.effective_limit_mph} limit for this vehicle${posted}`;
 }
 
 const legend = L.control({ position: "bottomleft" });
@@ -68,7 +75,7 @@ async function refresh() {
     }
     marker.setLatLng([p.latitude, p.longitude]).setStyle({ fillColor: COLOURS[state] });
     marker.details = `<b>${p.registration}</b> · ${p.driver_name ?? "no driver"}<br>` +
-      `${p.speed_mph.toFixed(0)} mph in a ${p.speed_limit_mph ?? "?"} limit (${state})`;
+      `${p.speed_mph.toFixed(0)} mph in ${limitText(p)} (${state})`;
   }
 }
 

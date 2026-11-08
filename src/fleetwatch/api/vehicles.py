@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fleetwatch.db import get_session
 from fleetwatch.models import Driver, Event, Vehicle
 from fleetwatch.schemas import EventRead, VehicleCreate, VehiclePosition, VehicleRead
+from fleetwatch.scoring import effective_limit_mph
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -36,7 +37,7 @@ def list_vehicles(session: SessionDep) -> list[VehicleRead]:
 def latest_positions(session: SessionDep) -> list[VehiclePosition]:
     """Each vehicle's most recent event (Postgres DISTINCT ON: the first row per vehicle)."""
     rows = session.execute(
-        select(Event, Vehicle.registration, Driver.name)
+        select(Event, Vehicle.registration, Vehicle.vehicle_class, Driver.name)
         .join(Vehicle, Event.vehicle_id == Vehicle.id)
         .outerjoin(Driver, Event.driver_id == Driver.id)
         .ext(distinct_on(Event.vehicle_id))
@@ -53,8 +54,11 @@ def latest_positions(session: SessionDep) -> list[VehiclePosition]:
             longitude=event.longitude,
             speed_mph=event.speed_mph,
             speed_limit_mph=event.speed_limit_mph,
+            effective_limit_mph=effective_limit_mph(
+                event.speed_limit_mph, event.carriageway, vehicle_class
+            ),
         )
-        for event, registration, driver_name in rows
+        for event, registration, vehicle_class, driver_name in rows
     ]
 
 

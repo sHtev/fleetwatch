@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from fleetwatch.models import EventKind
-from fleetwatch.scoring import Sample, haversine_miles, score_driver
+from fleetwatch.models import Carriageway, EventKind, VehicleClass
+from fleetwatch.scoring import Sample, effective_limit_mph, haversine_miles, score_driver
 
 START = datetime(2026, 11, 7, 9, 0, tzinfo=UTC)
 YORK = (53.9590, -1.0815)
@@ -90,3 +90,42 @@ def test_no_samples() -> None:
     result = score_driver([])
     assert result.score == 100.0
     assert result.distance_miles == 0
+
+
+# GOV.UK speed limits: goods vehicles up to 7.5 t are 50 / 60 / 70 mph on single carriageways,
+# dual carriageways and motorways. Cars and car-derived vans are 60 / 70 / 70.
+@pytest.mark.parametrize(
+    ("vehicle_class", "posted", "carriageway", "expected"),
+    [
+        (VehicleClass.VAN, 60, Carriageway.SINGLE, 50),
+        (VehicleClass.VAN, 70, Carriageway.DUAL, 60),
+        (VehicleClass.VAN, 70, Carriageway.MOTORWAY, 70),
+        (VehicleClass.VAN, 30, Carriageway.SINGLE, 30),  # a lower posted limit still wins
+        (VehicleClass.CAR, 60, Carriageway.SINGLE, 60),
+        (VehicleClass.CAR, 70, Carriageway.DUAL, 70),
+        (VehicleClass.VAN, 60, None, 60),  # road type unknown: only the posted limit
+        (VehicleClass.VAN, None, Carriageway.SINGLE, None),  # no posted limit: nothing to go on
+    ],
+)
+def test_effective_limit(
+    vehicle_class: VehicleClass,
+    posted: float | None,
+    carriageway: Carriageway | None,
+    expected: float | None,
+) -> None:
+    assert effective_limit_mph(posted, carriageway, vehicle_class) == expected
+
+
+def test_a_70_limit_means_the_road_is_not_single_carriageway() -> None:
+    # 70 mph only exists on dual carriageways and motorways, so the map data is wrong.
+    assert effective_limit_mph(70, Carriageway.SINGLE, VehicleClass.VAN) == 60
+
+
+def test_van_at_58_on_national_limit_single_carriageway_is_speeding() -> None:
+    samples = [
+        replace(s, carriageway=Carriageway.SINGLE, vehicle_class=VehicleClass.VAN)
+        for s in drive(speed=58, limit=60)
+    ]
+    assert score_driver(samples).speeding_percent == 100.0
+    car = [replace(s, vehicle_class=VehicleClass.CAR) for s in samples]
+    assert score_driver(car).speeding_percent == 0.0

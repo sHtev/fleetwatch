@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from fleetwatch.models import EventKind
+from fleetwatch.models import Carriageway, EventKind, VehicleClass
 
 # Gaps longer than this mean the vehicle was parked or lost signal: don't count them as driving.
 MAX_GAP_SECONDS = 60
@@ -22,6 +22,11 @@ POINTS_PER_INCIDENT_PER_100_MILES = 3.0
 POINTS_PER_PERCENT_SPEEDING = 1.0
 EARTH_RADIUS_MILES = 3958.8
 HARSH_KINDS = {EventKind.HARSH_BRAKING, EventKind.HARSH_ACCELERATION}
+# National limits by vehicle class and road (GOV.UK, England and Wales).
+CLASS_LIMITS_MPH = {
+    VehicleClass.CAR: {Carriageway.SINGLE: 60, Carriageway.DUAL: 70, Carriageway.MOTORWAY: 70},
+    VehicleClass.VAN: {Carriageway.SINGLE: 50, Carriageway.DUAL: 60, Carriageway.MOTORWAY: 70},
+}
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,8 @@ class Sample:
     longitude: float
     speed_mph: float
     speed_limit_mph: float | None
+    carriageway: Carriageway | None = None
+    vehicle_class: VehicleClass = VehicleClass.CAR
 
 
 @dataclass(frozen=True)
@@ -68,8 +75,19 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return 2 * EARTH_RADIUS_MILES * math.asin(math.sqrt(a))
 
 
+def effective_limit_mph(
+    posted: float | None, carriageway: Carriageway | None, vehicle_class: VehicleClass
+) -> float | None:
+    """The limit this vehicle must keep to: the posted limit or its class limit, if lower."""
+    if posted is None or carriageway is None:
+        return posted
+    if posted >= 70 and carriageway == Carriageway.SINGLE:
+        carriageway = Carriageway.DUAL  # 70 only exists on dual carriageways and motorways
+    return float(min(posted, CLASS_LIMITS_MPH[vehicle_class][carriageway]))
+
+
 def is_speeding(sample: Sample) -> bool:
-    limit = sample.speed_limit_mph
+    limit = effective_limit_mph(sample.speed_limit_mph, sample.carriageway, sample.vehicle_class)
     if limit is None:
         return False
     return sample.speed_mph > limit * (1 + SPEEDING_TOLERANCE_FRACTION) + SPEEDING_TOLERANCE_MPH
