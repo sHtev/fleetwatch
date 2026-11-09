@@ -87,3 +87,27 @@ def test_score_applies_the_vehicle_class_limit(client: TestClient) -> None:
     window = {"since": "2026-11-07T00:00:00Z", "until": "2026-11-08T00:00:00Z"}
     assert client.get(f"/drivers/{in_van}/score", params=window).json()["speeding_percent"] == 100
     assert client.get(f"/drivers/{in_car}/score", params=window).json()["speeding_percent"] == 0
+
+
+def test_driver_list_shows_the_vehicle_each_last_drove(client: TestClient) -> None:
+    first = client.post("/vehicles", json={"registration": "YK24 ABC"}).json()["id"]
+    second = client.post("/vehicles", json={"registration": "YK73 DEF"}).json()["id"]
+    sam = client.post("/drivers", json={"name": "Sam"}).json()["id"]
+    client.post("/drivers", json={"name": "Alex"})  # hasn't driven yet
+
+    def event(vehicle_id: int, minute: int) -> dict:
+        return {
+            "vehicle_id": vehicle_id,
+            "driver_id": sam,
+            "kind": "position",
+            "recorded_at": f"2026-11-07T09:{minute:02d}:00Z",
+            "latitude": 53.959,
+            "longitude": -1.08,
+            "speed_mph": 20.0,
+        }
+
+    client.post("/events", json=[event(first, 0), event(second, 30)])
+
+    drivers = {d["name"]: d for d in client.get("/drivers").json()}
+    assert drivers["Sam"]["vehicle_registration"] == "YK73 DEF"
+    assert drivers["Alex"]["vehicle_registration"] is None

@@ -4,11 +4,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import AwareDatetime
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from fleetwatch.db import get_session
 from fleetwatch.models import Driver, Event, Vehicle
-from fleetwatch.schemas import DriverCreate, DriverRead, DriverScoreRead
+from fleetwatch.schemas import DriverCreate, DriverListItem, DriverRead, DriverScoreRead
 from fleetwatch.scoring import Sample, score_driver
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
@@ -24,9 +25,24 @@ def create_driver(body: DriverCreate, session: SessionDep) -> DriverRead:
 
 
 @router.get("")
-def list_drivers(session: SessionDep) -> list[DriverRead]:
+def list_drivers(session: SessionDep) -> list[DriverListItem]:
+    # Each driver's most recent event tells us which vehicle they're in.
+    last_vehicle = dict(
+        session.execute(
+            select(Event.driver_id, Vehicle.registration)
+            .join(Vehicle, Event.vehicle_id == Vehicle.id)
+            .where(Event.driver_id.is_not(None))
+            .ext(distinct_on(Event.driver_id))
+            .order_by(Event.driver_id, Event.recorded_at.desc())
+        ).all()
+    )
     drivers = session.scalars(select(Driver).order_by(Driver.name))
-    return [DriverRead.model_validate(d) for d in drivers]
+    return [
+        DriverListItem(
+            **DriverRead.model_validate(d).model_dump(), vehicle_registration=last_vehicle.get(d.id)
+        )
+        for d in drivers
+    ]
 
 
 @router.get("/{driver_id}/score")

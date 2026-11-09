@@ -99,7 +99,7 @@ class Van:
         self.index, self.along = 0, 0.0  # on the stretch from path[index], this far along it
         self.speed = 0.0
         self.mood = 0.0  # the driver's current speed relative to the limit wanders a little
-        self.parked_seconds = rng.randint(0, 300)  # vans leave the depot at different times
+        self.parked_seconds = rng.randint(0, 45)  # vans leave the depot a few seconds apart
 
     def position(self) -> tuple[float, float]:
         a, b = self.path[self.index], self.path[self.index + 1]
@@ -217,6 +217,28 @@ def ensure_fleet(client: httpx.Client, rng: random.Random) -> list[Van]:
     return vans
 
 
+def send_live(client: httpx.Client, vans: list[Van]) -> None:
+    """One live tick: send each moving van's event and print a status line."""
+    now = datetime.now(UTC)
+    events, status = [], []
+    for van, (registration, *_) in zip(vans, FLEET, strict=True):
+        event = van.step(now)
+        if event is None:
+            status.append(f"{registration} parked")
+            continue
+        events.append(event)
+        harsh = " HARSH" if event["kind"] != "position" else ""
+        status.append(
+            f"{registration} {event['speed_mph']:>2.0f}/{event['speed_limit_mph']:.0f} mph{harsh}"
+        )
+    try:
+        if events:
+            client.post("/events", json=events).raise_for_status()
+    except httpx.HTTPError as error:  # e.g. the API restarting; carry on with the next tick
+        status.append(f"not sent: {error}")
+    print(now.astimezone().strftime("%H:%M:%S"), " | ".join(status), flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -231,11 +253,13 @@ def main() -> None:
     with httpx.Client(base_url=args.api, timeout=10) as client:
         vans = ensure_fleet(client, rng)
         if args.realtime:
-            while True:
-                events = [e for van in vans if (e := van.step(datetime.now(UTC)))]
-                if events:
-                    client.post("/events", json=events).raise_for_status()
-                time.sleep(SAMPLE_SECONDS)
+            print(f"Driving {len(vans)} vans live, every {SAMPLE_SECONDS} s. Ctrl-C to stop.")
+            try:
+                while True:
+                    send_live(client, vans)
+                    time.sleep(SAMPLE_SECONDS)
+            except KeyboardInterrupt:
+                return
 
         steps = int(args.hours * 3600 / SAMPLE_SECONDS)
         start = datetime.now(UTC) - timedelta(hours=args.hours)

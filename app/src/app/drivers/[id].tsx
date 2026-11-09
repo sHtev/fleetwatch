@@ -3,6 +3,7 @@ import { useLocalSearchParams } from "expo-router";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { type DriverScore, getJson } from "@/api";
+import { usePullRefresh } from "@/use-pull-refresh";
 
 function scoreColour(score: number): string {
   if (score >= 85) return "#1a9850";
@@ -13,15 +14,18 @@ function scoreColour(score: number): string {
 // The driver's 7-day score, and the figures behind it so they can see why.
 export default function ScoreScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, error, isFetching, refetch } = useQuery({
+  const { data, dataUpdatedAt, error, refetch } = useQuery({
     queryKey: ["drivers", id, "score"],
     queryFn: () => getJson<DriverScore>(`/drivers/${id}/score`),
+    refetchInterval: 10_000, // fresh while the screen is open
   });
+  const pull = usePullRefresh(refetch);
 
   return (
     <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={styles.container}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => void refetch()} />}
+      refreshControl={<RefreshControl {...pull} />}
     >
       {error && <Text>{error.message}</Text>}
       {data && (
@@ -39,6 +43,9 @@ export default function ScoreScreen() {
             />
             <Figure label="Time over the speed limit" value={`${data.speeding_percent}%`} />
           </View>
+          <Text style={styles.updated}>
+            Updated {new Date(dataUpdatedAt).toLocaleTimeString("en-GB")}
+          </Text>
         </>
       )}
     </ScrollView>
@@ -62,4 +69,5 @@ const styles = StyleSheet.create({
   figure: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
   label: { flexShrink: 1, color: "#444" },
   value: { fontWeight: "600" },
+  updated: { alignSelf: "center", color: "#999", marginTop: 24, fontSize: 12 },
 });

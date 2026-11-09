@@ -14,6 +14,11 @@
     .legend { background: #fff; padding: 8px 10px; border-radius: 6px; box-shadow: 0 1px 4px #0004; }
     .legend span { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
                    margin-right: 6px; vertical-align: -1px; }
+    /* Registration labels styled like a UK rear number plate */
+    .leaflet-tooltip.plate { background: #f7d117; color: #111; border: 1px solid #111; border-radius: 3px;
+                             padding: 1px 0; width: 76px; text-align: center; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 1px 3px #0006; }
+    .leaflet-tooltip.plate::before { display: none; }
+    .leaflet-tooltip.plate.parked { opacity: 0.5 !important; }
   </style>
 </head>
 <body>
@@ -67,13 +72,17 @@ async function refresh() {
     const state = status(p);
     let marker = markers.get(p.vehicle_id);
     if (!marker) {
-      marker = L.circleMarker([p.latitude, p.longitude], { radius: 9, weight: 2, color: "#fff", fillOpacity: 1 })
-        .bindTooltip(p.registration, { permanent: true, direction: "right", offset: [8, 0] })
+      marker = L.circleMarker([p.latitude, p.longitude], { weight: 2, color: "#fff", fillOpacity: 1 })
+        .bindTooltip(p.registration, { permanent: true, direction: "right", offset: [10, 0], className: "plate" })
         .addTo(map);
       marker.on("click", () => showScore(marker, p.driver_id));
       markers.set(p.vehicle_id, marker);
     }
-    marker.setLatLng([p.latitude, p.longitude]).setStyle({ fillColor: COLOURS[state] });
+    // Moving vans are bigger and drawn on top; parked ones shrink and their plates fade.
+    const parked = state === "parked";
+    marker.setLatLng([p.latitude, p.longitude]).setStyle({ fillColor: COLOURS[state] }).setRadius(parked ? 6 : 10);
+    if (!parked) marker.bringToFront();
+    marker.getTooltip().getElement()?.classList.toggle("parked", parked);
     marker.details = `<b>${p.registration}</b> · ${p.driver_name ?? "no driver"}<br>` +
       `${p.speed_mph.toFixed(0)} mph in ${limitText(p)} (${state})`;
   }

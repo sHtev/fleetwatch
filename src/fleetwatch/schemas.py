@@ -31,6 +31,10 @@ class DriverRead(DriverCreate):
     created_at: datetime
 
 
+class DriverListItem(DriverRead):
+    vehicle_registration: str | None  # the vehicle they last drove, if any
+
+
 class DriverScoreRead(BaseModel):
     """The score, plus the numbers behind it, so a coach can explain it to the driver."""
 

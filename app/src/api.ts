@@ -10,7 +10,7 @@ function apiUrl(): string {
 
 export const API_URL = apiUrl();
 
-export type Driver = { id: number; name: string };
+export type Driver = { id: number; name: string; vehicle_registration: string | null };
 
 export type DriverScore = {
   driver_id: number;
